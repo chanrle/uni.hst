@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Document ID: userId (Firebase Auth UID)
+    // Fields:
+    //   - id: string (required)
+    //   - email: string (required, email format)
+    //   - name: string (required)
+    //   - academicStanding: string (required)
+    //   - budget: number (required)
+    //   - plannedMajor: string (required)
+    //   - interests: list (optional)
+    //   - cvSummary: string (optional)
+    //   - financialStatement: string (optional)
+    //
+    // Collection: /users/{userId}/shortlist/{shortlistId}
+    // Document ID: auto-generated or uni-id
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - country: string (required)
+    //   - location: string (required)
+    //   - fitReason: string (required)
+    //   - tuitionFee: number (required)
+    //   - entryRequirements: string (required)
+    //   - scholarships: list (required)
+    //   - major: string (required)
+    //   - userRank: number (required)
+    //   - status: string (required, enum)
+    //   - tasks: list (required, list of maps)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "teddy.winniedapooh@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['id', 'email', 'name', 'academicStanding', 'budget', 'plannedMajor']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isValidEmail(data.email) &&
+             data.academicStanding is string &&
+             data.budget is number &&
+             data.plannedMajor is string;
+    }
+
+    function isValidShortlistItem(data) {
+      return hasRequiredFields(['id', 'name', 'country', 'location', 'fitReason', 'tuitionFee', 'entryRequirements', 'scholarships', 'major', 'userRank', 'status', 'tasks']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.country is string &&
+             data.location is string &&
+             data.fitReason is string &&
+             data.tuitionFee is number &&
+             data.entryRequirements is string &&
+             data.scholarships is list &&
+             data.major is string &&
+             data.userRank is number &&
+             data.status in ['shortlisted', 'applying', 'applied', 'accepted', 'rejected'] &&
+             data.tasks is list;
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /shortlist/{shortlistId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidShortlistItem(request.resource.data);
+        allow update: if isOwner(userId) && isValidShortlistItem(request.resource.data);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Default Deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
